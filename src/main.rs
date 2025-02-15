@@ -1,10 +1,6 @@
 use std::{ffi::OsString, time::Duration, fs::OpenOptions, io::Write};
-use std::io::Error as IoError;
 use windows::{
     Win32::System::EventLog::*,
-    // Win32::System::EventLog::{
-    //     EVENTLOGRECORD, CloseEventLog, ReadEventLogW, OpenEventLogW, GetOldestEventLogRecord, EVENTLOG_SEQUENTIAL_READ, EVENTLOG_INFORMATION_TYPE, EVENTLOG_ERROR_TYPE,
-    // },
     Win32::Foundation::{ 
         HANDLE, GetLastError
     },
@@ -24,7 +20,7 @@ use windows_service::{
 // const MONITORED_EVENT_IDS: &[u32] = &[6005, 6006];
 const SERVICE_NAME: &str = "WindowsEventLogger";
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
-const EVENTLOG_BACKWARDS_READ: u32 = 0x00000008;
+// const EVENTLOG_BACKWARDS_READ: u32 = 0x00000008;
 const EVENTLOG_SEEK_READ: u32 = 0x00000002;
 const EVENTLOG_FORWARDS_READ: u32 = 0x00000004; // Needed for forward reading
 
