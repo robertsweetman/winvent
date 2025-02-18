@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::{ffi::OsString, fs::OpenOptions, io::Write, time::Duration};
 use windows::{
     core::PCWSTR,
@@ -11,7 +13,7 @@ use windows::{
 use windows_service::{
     define_windows_service,
     service::{
-        ServiceAccess, ServiceControlAccept, ServiceExitCode, ServiceInfo,
+        ServiceAccess, ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceInfo,
         ServiceState, ServiceStatus, ServiceType,
     },
     service_control_handler::{self, ServiceControlHandlerResult, ServiceStatusHandle},
@@ -196,20 +198,27 @@ fn log_event(event_type: u16, message: &str) {
 }
 
 fn service_main(arguments: Vec<OsString>) {
-    let status_handle = match service_control_handler::register(SERVICE_NAME, |_| {
-        ServiceControlHandlerResult::NoError
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let running_clone = running.clone();
+
+    let status_handle = match service_control_handler::register(SERVICE_NAME, move |control_event| {
+        match control_event {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                log_event(EVENTLOG_INFORMATION_TYPE.0, "Received stop command");
+                running_clone.store(false, std::sync::atomic::Ordering::SeqCst);
+                ServiceControlHandlerResult::NoError
+            }
+            _ => ServiceControlHandlerResult::NotImplemented,
+        }
     }) {
         Ok(handle) => handle,
         Err(e) => {
-            log_event(
-                EVENTLOG_ERROR_TYPE.0,
-                &format!("Failed to register service control handler: {:?}", e),
-            );
+            log_event(EVENTLOG_ERROR_TYPE.0, &format!("Failed to register service control handler: {:?}", e));
             return;
         }
     };
 
-    if let Err(e) = run_service(arguments, status_handle) {
+    if let Err(e) = run_service(arguments, status_handle, running) {
         let error_msg = format!("Service failed: {}", e);
         log_event(EVENTLOG_ERROR_TYPE.0, &error_msg);
     }
@@ -232,10 +241,9 @@ fn write_to_debug_log(message: &str) {
 fn run_service(
     _arguments: Vec<OsString>,
     status_handle: ServiceStatusHandle,
+    running: Arc<AtomicBool>,
 ) -> Result<(), windows_service::Error> {
     write_to_debug_log("Service starting...");
-    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-
     // Set to Running immediately
     status_handle.set_service_status(ServiceStatus {
         service_type: SERVICE_TYPE,
