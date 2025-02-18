@@ -25,6 +25,8 @@ use windows_service::{
 struct Config {
     event_source: String,
     monitored_event_ids: Vec<u32>,
+    debug: bool,
+    debug_path: Option<String>,
 }
 
 impl Default for Config {
@@ -32,6 +34,8 @@ impl Default for Config {
         Self {
             event_source: "Application".to_string(),
             monitored_event_ids: vec![1001, 1006],
+            debug: true, // set this to false on release build somehow?
+            debug_path: Some("C:\\Temp".to_string()),
         }
     }
 }
@@ -42,7 +46,7 @@ impl Config {
         let config_path = exe_path
             .parent()
             .unwrap_or_else(|| Path::new(""))
-            .join("config.toml");
+            .join("example-config.toml");
 
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             toml::from_str(&content).unwrap_or_else(|e| {
@@ -87,7 +91,7 @@ fn main() -> Result<(), windows_service::Error> {
 
 fn install_service() -> windows_service::Result<()> {
     let exe_path = std::env::current_exe().unwrap();
-    let config_path = exe_path.parent().unwrap().join("config.toml");
+    let config_path = exe_path.parent().unwrap().join("example-config.toml");
 
     // Create default config if it doesn't exist
     if !config_path.exists() {
@@ -225,10 +229,20 @@ fn service_main(arguments: Vec<OsString>) {
 }
 
 fn write_to_debug_log(message: &str) {
+    let config = Config::load();
+
+    // Only write to debug logs if debug is enabled
+    if !config.debug {
+        return;
+    }
+
+    let debug_path = config.debug_path.unwrap_or_else(|| "C:\\Temp".to_string());
+    let log_path = Path::new(&debug_path).join("winvent_debug.log");
+
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("C:\\Temp\\service_events.log")
+        .open(log_path)
     // Using full path in C:\Temp
     {
         let timestamp = std::time::SystemTime::now()
