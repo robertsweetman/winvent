@@ -5,10 +5,7 @@ use std::sync::Arc;
 use std::{ffi::OsString, fs::OpenOptions, io::Write, time::Duration};
 use windows::{
     core::PCWSTR,
-    Win32::{
-        Foundation::HANDLE,
-        System::EventLog::*,
-    },
+    Win32::{Foundation::HANDLE, System::EventLog::*},
 };
 use windows_service::{
     define_windows_service,
@@ -25,6 +22,8 @@ use windows_service::{
 struct Config {
     event_source: String,
     monitored_event_ids: Vec<u32>,
+    debug: bool,
+    debug_path: Option<String>,
 }
 
 impl Default for Config {
@@ -32,6 +31,8 @@ impl Default for Config {
         Self {
             event_source: "Application".to_string(),
             monitored_event_ids: vec![1001, 1006],
+            debug: true, // set this to false on release build somehow?
+            debug_path: Some("C:\\Temp".to_string()),
         }
     }
 }
@@ -39,18 +40,74 @@ impl Default for Config {
 impl Config {
     fn load() -> Self {
         let exe_path = std::env::current_exe().unwrap_or_default();
+        let example_config_path = exe_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join("example-config.toml");
+
         let config_path = exe_path
             .parent()
             .unwrap_or_else(|| Path::new(""))
             .join("config.toml");
 
-        if let Ok(content) = std::fs::read_to_string(&config_path) {
-            toml::from_str(&content).unwrap_or_else(|e| {
-                write_to_debug_log(&format!("Error parsing config: {}. Using defaults.", e));
+        if (config_path).exists() {
+            if let Ok(content) = std::fs::read_to_string(&config_path) {
+                let config = toml::from_str(&content).unwrap_or_else(|e| {
+                    write_to_debug_log(&format!("Error parsing config: {}. Using defaults.", e));
+                    Config::default()
+                });
+                // Write directly to file instead of using write_to_debug_log
+                if config.debug {
+                    if let Some(debug_path) = &config.debug_path {
+                        let log_path = Path::new(debug_path).join("winvent_debug.log");
+                        if let Ok(mut file) =
+                            OpenOptions::new().create(true).append(true).open(log_path)
+                        {
+                            let _ = writeln!(file, "Loaded config.toml: source={}, debug={}, debug_path={:?}, monitored_event_ids={:?}",
+                                config.event_source,
+                                config.debug,
+                                config.debug_path,
+                                config.monitored_event_ids,
+                            );
+                        }
+                    }
+                }
+
+                return config;
+            } else {
+                write_to_debug_log("config.toml file not found, looking for example-config.toml");
                 Config::default()
-            })
+            }
+        } else if (example_config_path).exists() {
+            if let Ok(content) = std::fs::read_to_string(&example_config_path) {
+                let config = toml::from_str(&content).unwrap_or_else(|e| {
+                    write_to_debug_log(&format!("Error parsing config: {}. Using defaults.", e));
+                    Config::default()
+                });
+                // Write directly to file instead of using write_to_debug_log
+                if config.debug {
+                    if let Some(debug_path) = &config.debug_path {
+                        let log_path = Path::new(debug_path).join("winvent_debug.log");
+                        if let Ok(mut file) =
+                            OpenOptions::new().create(true).append(true).open(log_path)
+                        {
+                            let _ = writeln!(file, "Loaded example-config.toml: source={}, debug={}, debug_path={:?}, monitored_event_ids={:?}",
+                                config.event_source,
+                                config.debug,
+                                config.debug_path,
+                                config.monitored_event_ids,
+                            );
+                        }
+                    }
+                }
+
+                return config;
+            } else {
+                write_to_debug_log("example-config.toml file not found, using defaults");
+                Config::default()
+            }
         } else {
-            write_to_debug_log("Config file not found. Using defaults.");
+            write_to_debug_log("No config files found. Using application defaults.");
             Config::default()
         }
     }
@@ -87,7 +144,7 @@ fn main() -> Result<(), windows_service::Error> {
 
 fn install_service() -> windows_service::Result<()> {
     let exe_path = std::env::current_exe().unwrap();
-    let config_path = exe_path.parent().unwrap().join("config.toml");
+    let config_path = exe_path.parent().unwrap().join("example-config.toml");
 
     // Create default config if it doesn't exist
     if !config_path.exists() {
@@ -201,22 +258,26 @@ fn service_main(arguments: Vec<OsString>) {
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let running_clone = running.clone();
 
-    let status_handle = match service_control_handler::register(SERVICE_NAME, move |control_event| {
-        match control_event {
-            ServiceControl::Stop | ServiceControl::Shutdown => {
-                log_event(EVENTLOG_INFORMATION_TYPE.0, "Received stop command");
-                running_clone.store(false, std::sync::atomic::Ordering::SeqCst);
-                ServiceControlHandlerResult::NoError
+    let status_handle =
+        match service_control_handler::register(SERVICE_NAME, move |control_event| {
+            match control_event {
+                ServiceControl::Stop | ServiceControl::Shutdown => {
+                    log_event(EVENTLOG_INFORMATION_TYPE.0, "Received stop command");
+                    running_clone.store(false, std::sync::atomic::Ordering::SeqCst);
+                    ServiceControlHandlerResult::NoError
+                }
+                _ => ServiceControlHandlerResult::NotImplemented,
             }
-            _ => ServiceControlHandlerResult::NotImplemented,
-        }
-    }) {
-        Ok(handle) => handle,
-        Err(e) => {
-            log_event(EVENTLOG_ERROR_TYPE.0, &format!("Failed to register service control handler: {:?}", e));
-            return;
-        }
-    };
+        }) {
+            Ok(handle) => handle,
+            Err(e) => {
+                log_event(
+                    EVENTLOG_ERROR_TYPE.0,
+                    &format!("Failed to register service control handler: {:?}", e),
+                );
+                return;
+            }
+        };
 
     if let Err(e) = run_service(arguments, status_handle, running) {
         let error_msg = format!("Service failed: {}", e);
@@ -225,10 +286,17 @@ fn service_main(arguments: Vec<OsString>) {
 }
 
 fn write_to_debug_log(message: &str) {
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("C:\\Temp\\service_events.log")
+    let config = Config::load();
+
+    // Only write to debug logs if debug is enabled
+    if !config.debug {
+        return;
+    }
+
+    let debug_path = config.debug_path.unwrap_or_else(|| "C:\\Temp".to_string());
+    let log_path = Path::new(&debug_path).join("winvent_debug.log");
+
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path)
     // Using full path in C:\Temp
     {
         let timestamp = std::time::SystemTime::now()
