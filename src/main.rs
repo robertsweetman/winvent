@@ -394,19 +394,77 @@ fn run_service(
                                 if bytes_read > 0 {
                                     let event_record =
                                         unsafe { &*(buffer.as_ptr() as *const EVENTLOGRECORD) };
-
                                     let event_id = event_record.EventID & 0xFFFF;
 
                                     if config.monitored_event_ids.contains(&event_id) {
+                                        // Get strings from the event record
+                                        let strings_offset = event_record.StringOffset as usize;
+                                        let mut current_offset = strings_offset;
+                                        let mut strings = Vec::new();
+
+                                        for _ in 0..event_record.NumStrings {
+                                            let mut len = 0;
+                                            let string_ptr = unsafe {
+                                                let ptr = buffer.as_ptr().add(current_offset)
+                                                    as *const u16;
+                                                while *ptr.add(len) != 0 {
+                                                    len += 1;
+                                                }
+                                                ptr
+                                            };
+
+                                            let string_slice = unsafe {
+                                                std::slice::from_raw_parts(string_ptr, len)
+                                            };
+
+                                            if let Ok(s) = String::from_utf16(string_slice) {
+                                                strings.push(s);
+                                            }
+                                            current_offset += (len + 1) * 2;
+                                        }
+
+                                        // Get source name
+                                        let source_offset = event_record.UserSidOffset as usize;
+                                        let source_ptr = unsafe {
+                                            buffer.as_ptr().add(source_offset) as *const u16
+                                        };
+
+                                        let mut source_len = 0;
+                                        unsafe {
+                                            while *source_ptr.add(source_len) != 0 {
+                                                source_len += 1;
+                                            }
+                                        }
+
+                                        let source_name = unsafe {
+                                            let slice =
+                                                std::slice::from_raw_parts(source_ptr, source_len);
+                                            String::from_utf16_lossy(slice)
+                                        };
                                         write_to_debug_log(&format!(
-                                            "Monitored Event - ID: {}, Record #: {}, Type: {:?}",
+                                            "Event Details:\n\
+                                             ID: {}\n\
+                                             Type: {:?}\n\
+                                             Source: {}\n\
+                                             Record #: {}\n\
+                                             Time Generated: {}\n\
+                                             Time Written: {}\n\
+                                             Category: {}\n\
+                                             Strings: {:?}\n\
+                                             Raw Data Length: {}",
                                             event_id,
+                                            event_record.EventType,
+                                            source_name,
                                             event_record.RecordNumber,
-                                            event_record.EventType
+                                            event_record.TimeGenerated,
+                                            event_record.TimeWritten,
+                                            event_record.EventCategory,
+                                            strings,
+                                            event_record.DataLength
                                         ));
                                     }
+                                    last_record = newest;
                                 }
-                                last_record = newest;
                             }
                             Err(e) => {
                                 write_to_debug_log(&format!("Error reading events: {:?}", e));
