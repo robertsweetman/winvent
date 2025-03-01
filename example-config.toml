@@ -1,0 +1,9 @@
+event_source = "Application"
+monitored_event_ids = [
+    1001,
+    1012,
+]
+debug = true
+debug_path = 'C:\Temp'
+cloudwatch = true
+aws_region = "eu-west-1"

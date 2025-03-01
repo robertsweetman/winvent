@@ -1,0 +1,88 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to S3'
+        required: true
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+        target: x86_64-pc-windows-msvc
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        
+    - name: Build
+      run: cargo build --release
+      
+    # - name: Run tests
+    #   run: cargo test --release
+      
+    - name: Create artifact
+      run: |
+        mkdir -p artifact
+        cp target/release/winvent.exe artifact/
+        cp example-config.toml artifact/
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: winvent-windows
+        path: artifact/
+        
+  deploy:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: winvent-windows
+        path: artifact
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        
+    - name: Create zip file
+      run: |
+        cd artifact
+        zip -r ../winvent-${{ github.sha }}.zip .
+        cd ..
+        
+    - name: Upload to S3
+      run: |
+        aws s3 cp winvent-${{ github.sha }}.zip s3://${{ secrets.S3_BUCKET }}/winvent-${{ github.sha }}.zip
+        # Also upload as latest
+        aws s3 cp winvent-${{ github.sha }}.zip s3://${{ secrets.S3_BUCKET }}/winvent-latest.zip
