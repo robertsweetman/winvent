@@ -12,6 +12,8 @@ pub struct Config {
     pub monitored_event_ids: Vec<u32>,
     pub debug: bool,
     pub debug_path: Option<String>,
+    pub cloudwatch: bool,
+    pub aws_region: Option<String>,
 }
 
 impl Default for Config {
@@ -21,6 +23,8 @@ impl Default for Config {
             monitored_event_ids: vec![1001, 1006],
             debug: true, // set this to false on release build somehow?
             debug_path: Some("C:\\Temp".to_string()),
+            cloudwatch: false,
+            aws_region: Some("eu-west-1".to_string()),
         }
     }
 }
@@ -51,11 +55,13 @@ impl Config {
                         if let Ok(mut file) =
                             OpenOptions::new().create(true).append(true).open(log_path)
                         {
-                            let _ = writeln!(file, "Loaded config.toml: source={}, debug={}, debug_path={:?}, monitored_event_ids={:?}",
+                            let _ = writeln!(file, "Loaded config.toml: source={}, debug={}, debug_path={:?}, monitored_event_ids={:?}, cloudwatch={}, aws_region={:?}",
                                 config.event_source,
                                 config.debug,
                                 config.debug_path,
                                 config.monitored_event_ids,
+                                config.cloudwatch,
+                                config.aws_region,
                             );
                         }
                     }
@@ -79,11 +85,13 @@ impl Config {
                         if let Ok(mut file) =
                             OpenOptions::new().create(true).append(true).open(log_path)
                         {
-                            let _ = writeln!(file, "Loaded example-config.toml: source={}, debug={}, debug_path={:?}, monitored_event_ids={:?}",
+                            let _ = writeln!(file, "Loaded example-config.toml: source={}, debug={}, debug_path={:?}, monitored_event_ids={:?}, cloudwatch={}, aws_region={:?}",
                                 config.event_source,
                                 config.debug,
                                 config.debug_path,
                                 config.monitored_event_ids,
+                                config.cloudwatch,
+                                config.aws_region,
                             );
                         }
                     }

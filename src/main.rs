@@ -1,7 +1,7 @@
 mod config;
 mod logging;
 mod service;
-// mod cloudwatch;
+mod cloudwatch;
 
 use service::service_main;
 use std::env::args;

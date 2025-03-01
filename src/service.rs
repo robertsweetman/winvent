@@ -72,6 +72,35 @@ pub fn run_service(
         config.event_source
     ));
 
+    // Log startup based on config
+    log_event(EVENTLOG_INFORMATION_TYPE.0, &format!(
+        "Service started: monitoring {} event source, debug={}, cloudwatch={}",
+        config.event_source, config.debug, config.cloudwatch
+    ));
+
+    // Initialize CloudWatch client only if enabled
+    let mut cloudwatch_client = if config.cloudwatch {
+        let cloudwatch_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+            
+        match cloudwatch_runtime.block_on(async {
+            crate::cloudwatch::CloudWatchClient::new(&config).await
+        }) {
+            Ok(client) => {
+                log_event(EVENTLOG_INFORMATION_TYPE.0, "CloudWatch client initialized successfully");
+                Some((client, cloudwatch_runtime))
+            },
+            Err(e) => {
+                log_event(EVENTLOG_ERROR_TYPE.0, &format!("Failed to initialize CloudWatch client: {:?}", e));
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Initialize last_record to current newest record
     let mut last_record: u32 = {
         if let Ok(handle) = unsafe {
@@ -184,7 +213,7 @@ pub fn run_service(
                                                 std::slice::from_raw_parts(source_ptr, source_len);
                                             String::from_utf16_lossy(slice)
                                         };
-                                        write_to_debug_log(&format!(
+                                        let event_details = format!(
                                             "Event Details:\n\
                                              ID: {}\n\
                                              Type: {:?}\n\
@@ -204,7 +233,31 @@ pub fn run_service(
                                             event_record.EventCategory,
                                             strings,
                                             event_record.DataLength
-                                        ));
+                                        );
+
+                                        if config.debug {
+                                            write_to_debug_log(&event_details);
+                                        }
+
+                                        if config.cloudwatch {
+                                            if let Some((client, runtime)) = &mut cloudwatch_client {
+                                                let formatted_event = crate::cloudwatch::format_event_for_cloudwatch(
+                                                    event_id,
+                                                    event_record.EventType.0 as u32,
+                                                    &source_name,
+                                                    event_record.RecordNumber,
+                                                    event_record.TimeGenerated,
+                                                    event_record.TimeWritten,
+                                                    event_record.EventCategory,
+                                                    &strings,
+                                                );
+                                                if let Err(e) = runtime.block_on(async {
+                                                    client.send_event(&formatted_event).await
+                                                }) {
+                                                    log_event(EVENTLOG_WARNING_TYPE.0, &format!("Failed to send event to CloudWatch: {:?}", e));
+                                                }
+                                            }
+                                        }
                                     }
                                     last_record = newest;
                                 }
