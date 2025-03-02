@@ -73,10 +73,13 @@ pub fn run_service(
     ));
 
     // Log startup based on config
-    log_event(EVENTLOG_INFORMATION_TYPE.0, &format!(
-        "Service started: monitoring {} event source, debug={}, cloudwatch={}",
-        config.event_source, config.debug, config.cloudwatch
-    ));
+    log_event(
+        EVENTLOG_INFORMATION_TYPE.0,
+        &format!(
+            "Service started: monitoring {} event source, debug={}, cloudwatch={}",
+            config.event_source, config.debug, config.cloudwatch
+        ),
+    );
 
     // Initialize CloudWatch client only if enabled
     let mut cloudwatch_client = if config.cloudwatch {
@@ -84,16 +87,22 @@ pub fn run_service(
             .enable_all()
             .build()
             .unwrap();
-            
-        match cloudwatch_runtime.block_on(async {
-            crate::cloudwatch::CloudWatchClient::new(&config).await
-        }) {
+
+        match cloudwatch_runtime
+            .block_on(async { crate::cloudwatch::CloudWatchClient::new(&config).await })
+        {
             Ok(client) => {
-                log_event(EVENTLOG_INFORMATION_TYPE.0, "CloudWatch client initialized successfully");
+                log_event(
+                    EVENTLOG_INFORMATION_TYPE.0,
+                    "CloudWatch client initialized successfully",
+                );
                 Some((client, cloudwatch_runtime))
-            },
+            }
             Err(e) => {
-                log_event(EVENTLOG_ERROR_TYPE.0, &format!("Failed to initialize CloudWatch client: {:?}", e));
+                log_event(
+                    EVENTLOG_ERROR_TYPE.0,
+                    &format!("Failed to initialize CloudWatch client: {:?}", e),
+                );
                 None
             }
         }
@@ -240,17 +249,19 @@ pub fn run_service(
                                         }
 
                                         if config.cloudwatch {
-                                            if let Some((client, runtime)) = &mut cloudwatch_client {
-                                                let formatted_event = crate::cloudwatch::format_event_for_cloudwatch(
-                                                    event_id,
-                                                    event_record.EventType.0 as u32,
-                                                    &source_name,
-                                                    event_record.RecordNumber,
-                                                    event_record.TimeGenerated,
-                                                    event_record.TimeWritten,
-                                                    event_record.EventCategory,
-                                                    &strings,
-                                                );
+                                            if let Some((client, runtime)) = &mut cloudwatch_client
+                                            {
+                                                let formatted_event =
+                                                    crate::cloudwatch::format_event_for_cloudwatch(
+                                                        event_id,
+                                                        event_record.EventType.0 as u32,
+                                                        &source_name,
+                                                        event_record.RecordNumber,
+                                                        event_record.TimeGenerated,
+                                                        event_record.TimeWritten,
+                                                        event_record.EventCategory,
+                                                        &strings,
+                                                    );
                                                 if let Err(e) = runtime.block_on(async {
                                                     client.send_event(&formatted_event).await
                                                 }) {
