@@ -22,5 +22,5 @@ If you change the config 'cause you've added more EventId's or want to look at a
 
 ## things to do
 
-* testing
 * possibly reformat event capture
+* needs testing on an EC2 windows instance
